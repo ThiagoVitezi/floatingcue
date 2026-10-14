@@ -288,6 +288,7 @@ textarea {
       <li>Para mudar a velocidade, toque no ícone de voltar da janela, ajuste aqui e abra de novo. A posição é mantida.</li>
     </ol>
     <p>A janela flutuante só abre com a página direto no Safari. Dentro de outros apps (Instagram, WhatsApp, Claude) o iOS bloqueia.</p>
+    <p id="diag"></p>
   </section>
 </main>
 
@@ -315,6 +316,22 @@ textarea {
     mirror: store.get("mirror", false)
   };
   if (!FORMATS[cfg.format]) cfg.format = "16:9";
+
+  const VERSION = "v2";
+
+  // Pede ao iOS que trate a mídia desta página como "ambiente", que se mistura com outros apps
+  // (como a Câmera) em vez de ser interrompida por eles.
+  let audioMode = "indisponível";
+  function setAmbient() {
+    try {
+      if (navigator.audioSession) {
+        if (navigator.audioSession.type !== "ambient") navigator.audioSession.type = "ambient";
+        audioMode = navigator.audioSession.type || "ambient";
+      }
+    } catch (e) { audioMode = "erro"; }
+    const el = document.getElementById("diag");
+    if (el) el.textContent = `${VERSION} · áudio: ${audioMode}`;
+  }
 
   const video = $("video"), preview = $("preview"), pctx = preview.getContext("2d");
   let rendered = null;          // { sig, wpm, url, duration }
@@ -592,6 +609,7 @@ textarea {
         else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
         return;
       }
+      setAmbient();
       const startPaused = video.paused;
       const p = video.play(); if (p && p.catch) p.catch(() => {});
       if (video.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
@@ -615,7 +633,25 @@ textarea {
     // o iOS às vezes volta a velocidade para 1 ao alternar play/pause na janela
     if (rendered) { const want = Math.min(Math.max(cfg.wpm / rendered.wpm, 0.5), 2.5); if (Math.abs(video.playbackRate - want) > 0.01 && video.playbackRate === 1) video.playbackRate = want; }
   });
-  video.addEventListener("play", () => { if (rendered) applyRate(); });
+  video.addEventListener("play", () => { setAmbient(); if (rendered) applyRate(); });
+
+  // Diagnóstico: registra se o vídeo foi interrompido enquanto a página estava em segundo plano.
+  let hiddenAt = 0, pausedWhileHidden = false;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { hiddenAt = Date.now(); pausedWhileHidden = false; return; }
+    if (hiddenAt && pausedWhileHidden && rendered) {
+      say("O iOS pausou a janela enquanto outro app estava aberto. Toque em Rodar aqui e volte para a câmera.", "error");
+    }
+    hiddenAt = 0;
+  });
+  video.addEventListener("pause", () => { if (document.hidden) pausedWhileHidden = true; });
+  // Se a página recarregar com a janela ainda marcada como aberta, o iOS fechou a aba em segundo plano.
+  const pipFlag = (on) => { try { if (on) sessionStorage.setItem("fc.pip", "1"); else sessionStorage.removeItem("fc.pip"); } catch (e) { /* ignora */ } };
+  let tabWasKilled = false;
+  try { tabWasKilled = sessionStorage.getItem("fc.pip") === "1"; sessionStorage.removeItem("fc.pip"); } catch (e) { /* ignora */ }
+  video.addEventListener("enterpictureinpicture", () => pipFlag(true));
+  video.addEventListener("leavepictureinpicture", () => pipFlag(false));
+  video.addEventListener("webkitpresentationmodechanged", () => pipFlag(video.webkitPresentationMode === "picture-in-picture"));
 
   function seek(delta) {
     if (!rendered) return;
@@ -715,6 +751,8 @@ textarea {
   drawPreview();
   refreshState();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawPreview);
-  if (typeof VideoEncoder === "undefined") say("Atenção: este navegador não gera vídeo. No iPhone, use o Safari com iOS 17 ou mais recente.", "error");
+  setAmbient();
+  if (tabWasKilled) say("Diagnóstico: o iOS fechou esta aba enquanto a janela flutuante estava aberta (a página recarregou).", "error");
+  else if (typeof VideoEncoder === "undefined") say("Atenção: este navegador não gera vídeo. No iPhone, use o Safari com iOS 17 ou mais recente.", "error");
 })();
 </script>
