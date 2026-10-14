@@ -1,0 +1,720 @@
+<title>Floating Cue</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="apple-mobile-web-app-title" content="Floating Cue">
+<meta name="theme-color" content="#0e1218">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout: uma coluna estreita de estúdio — a "tela" do prompter no topo, controles empilhados abaixo, como um app. */
+:root {
+  --bg: #eceff3;
+  --surface: #ffffff;
+  --ink: #141a24;
+  --muted: #586273;
+  --line: #d3d9e2;
+  --accent: #a85a00;
+  --accent-fill: #f2a516;
+  --on-accent: #1d1303;
+  --rec: #d23b40;
+  --ok: #1f7a4d;
+  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Barlow Condensed", "Arial Narrow", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1218; --surface: #171c25; --ink: #e7ebf1; --muted: #93a0b2; --line: #29313f;
+    --accent: #ffb22e; --accent-fill: #ffb22e; --on-accent: #1d1303; --rec: #ff5f63; --ok: #4cc38a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1218; --surface: #171c25; --ink: #e7ebf1; --muted: #93a0b2; --line: #29313f;
+  --accent: #ffb22e; --accent-fill: #ffb22e; --on-accent: #1d1303; --rec: #ff5f63; --ok: #4cc38a;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+.wrap {
+  max-width: 680px;
+  margin: 0 auto;
+  padding-block: 20px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid;
+  gap: 18px;
+}
+
+header { display: grid; gap: 2px; }
+.mark {
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display); font-weight: 700; font-size: 30px;
+  letter-spacing: .07em; text-transform: uppercase; line-height: 1.1;
+}
+.tally {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--accent-fill);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-fill) 22%, transparent);
+}
+.tag { color: var(--muted); margin: 0; font-size: 15px; }
+
+.stage { display: grid; gap: 12px; }
+.screen {
+  position: relative;
+  width: min(100%, calc(60vh * var(--arn, 1.7778)));
+  aspect-ratio: var(--ar, 16 / 9);
+  max-width: 100%;
+  margin-inline: auto;
+  background: #000;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.screen video, .screen canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #000;
+}
+.screen canvas { z-index: 1; }
+
+.status-row {
+  display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-display); font-weight: 700; font-size: 14px;
+  letter-spacing: .1em; text-transform: uppercase;
+  padding: 3px 10px; border-radius: 999px;
+  border: 1px solid var(--line); color: var(--muted);
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.pill[data-kind="ready"] { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.pill[data-kind="stale"] { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.pill[data-kind="live"] { color: var(--rec); border-color: color-mix(in srgb, var(--rec) 45%, transparent); }
+
+.gen { display: grid; gap: 6px; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent-fill); transition: width .15s linear; }
+.gen span { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+button {
+  font: inherit; color: inherit; cursor: pointer;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--surface);
+  min-height: 48px; padding: 0 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent-fill) 70%, transparent); outline-offset: 2px;
+}
+button:disabled { opacity: .45; cursor: not-allowed; }
+.primary {
+  background: var(--accent-fill); color: var(--on-accent); border-color: transparent;
+  font-weight: 700; font-size: 17px;
+}
+.float {
+  font-family: var(--font-display); font-weight: 700; font-size: 19px; letter-spacing: .08em;
+  text-transform: uppercase; border: 2px solid var(--accent-fill); color: var(--ink);
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.float svg { width: 22px; height: 22px; }
+.actions { display: grid; gap: 10px; }
+
+.transport { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.transport button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 58px; padding: 6px 4px; font-size: 12px; color: var(--muted); }
+.transport button svg { width: 22px; height: 22px; color: var(--ink); }
+.transport .play svg { width: 26px; height: 26px; }
+
+.msg { margin: 0; font-size: 14px; min-height: 1.5em; color: var(--muted); }
+.msg[data-kind="error"] { color: var(--rec); }
+.msg[data-kind="ok"] { color: var(--ok); }
+
+.panel {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+  padding: 16px; display: grid; gap: 16px;
+}
+h2 {
+  margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 15px;
+  letter-spacing: .14em; text-transform: uppercase; color: var(--muted);
+}
+.field { display: grid; gap: 6px; }
+.field-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.field-head label, .field-head .lbl { font-weight: 700; }
+.field-head output { font-variant-numeric: tabular-nums; color: var(--accent); font-weight: 700; }
+.hint { margin: 0; font-size: 13px; color: var(--muted); }
+input[type="range"] { width: 100%; accent-color: var(--accent-fill); height: 28px; }
+
+.seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg label {
+  display: grid; justify-items: center; gap: 6px; padding: 10px 4px 8px;
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer; font-size: 13px; color: var(--muted);
+}
+.seg label i { display: block; border: 2px solid currentColor; border-radius: 3px; }
+.seg input:checked + label { border-color: var(--accent-fill); color: var(--ink); background: color-mix(in srgb, var(--accent-fill) 12%, transparent); }
+.seg input:focus-visible + label { outline: 3px solid color-mix(in srgb, var(--accent-fill) 70%, transparent); outline-offset: 2px; }
+
+.switch { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.switch input { width: 22px; height: 22px; accent-color: var(--accent-fill); }
+.switch label { font-weight: 700; }
+
+.cal-text {
+  margin: 0; padding: 12px 14px; border-left: 3px solid var(--accent-fill);
+  background: color-mix(in srgb, var(--accent-fill) 8%, transparent);
+  border-radius: 0 10px 10px 0; font-size: 16px; max-width: 65ch;
+}
+.cal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.cal-row button { flex: 0 0 auto; }
+#calTimer { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--accent); }
+
+textarea {
+  width: 100%; min-height: 240px; resize: vertical;
+  font: 16px/1.55 var(--font-body); color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 12px;
+}
+.counts { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.how { display: grid; gap: 12px; }
+.how ol { margin: 0; padding-left: 1.3em; display: grid; gap: 8px; max-width: 65ch; }
+.how li::marker { font-family: var(--font-display); font-weight: 700; color: var(--accent); }
+.how p { margin: 0; max-width: 65ch; font-size: 15px; color: var(--muted); }
+
+@media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+</style>
+
+<main class="wrap">
+  <header>
+    <div class="mark"><span class="tally" aria-hidden="true"></span>Floating Cue</div>
+    <p class="tag">Seu roteiro numa janela flutuante, por cima da câmera que você quiser.</p>
+  </header>
+
+  <section class="stage" aria-label="Teleprompter">
+    <div class="screen" id="screen">
+      <video id="video" playsinline webkit-playsinline muted preload="auto" aria-label="Vídeo do teleprompter"></video>
+      <canvas id="preview" aria-label="Prévia do teleprompter"></canvas>
+    </div>
+    <div class="status-row">
+      <span class="pill" id="pill">Prévia</span>
+      <span id="durationLabel"></span>
+    </div>
+    <div class="gen" id="gen" hidden>
+      <div class="bar"><i id="genFill"></i></div>
+      <span id="genLabel">Preparando…</span>
+    </div>
+    <div class="actions">
+      <button class="primary" id="btnGen" type="button">Gerar vídeo do roteiro</button>
+      <button class="float" id="btnPip" type="button" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="2.5" y="4.5" width="19" height="15" rx="2.5"/><rect x="11.5" y="11.5" width="7.5" height="5.5" rx="1" fill="currentColor" stroke="none"/></svg>
+        <span id="btnPipLabel">Abrir janela flutuante</span>
+      </button>
+    </div>
+    <div class="transport" aria-label="Controles de reprodução">
+      <button type="button" id="btnRestart" disabled>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg>Início
+      </button>
+      <button type="button" id="btnBack" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>−10 s
+      </button>
+      <button type="button" id="btnPlay" class="play" disabled>
+        <svg id="icoPlay" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
+        <svg id="icoPause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" hidden><path d="M6 4.5h4.5v15H6zM13.5 4.5H18v15h-4.5z"/></svg>
+        <span id="playLabel">Rodar</span>
+      </button>
+      <button type="button" id="btnFwd" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/></svg>+10 s
+      </button>
+    </div>
+    <p class="msg" id="msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <section class="panel" aria-labelledby="h-ctrl">
+    <h2 id="h-ctrl">Controles</h2>
+    <div class="field">
+      <div class="field-head"><label for="wpm">Velocidade</label><output id="wpmOut" for="wpm"></output></div>
+      <input type="range" id="wpm" min="60" max="240" step="5">
+      <p class="hint" id="wpmHint">Muda na hora, sem gerar o vídeo de novo.</p>
+    </div>
+    <div class="field">
+      <div class="field-head"><label for="font">Tamanho da letra</label><output id="fontOut" for="font"></output></div>
+      <input type="range" id="font" min="32" max="120" step="2">
+      <p class="hint">A janela flutuante começa pequena; letra grande ajuda. Depois você amplia a janela com dois dedos.</p>
+    </div>
+    <div class="field">
+      <span class="field-head"><span class="lbl" id="fmtLbl">Formato da janela</span></span>
+      <div class="seg" role="radiogroup" aria-labelledby="fmtLbl">
+        <input type="radio" name="fmt" id="fmt169" value="16:9"><label for="fmt169"><i style="width:30px;height:17px"></i>16:9</label>
+        <input type="radio" name="fmt" id="fmt43" value="4:3"><label for="fmt43"><i style="width:26px;height:20px"></i>4:3</label>
+        <input type="radio" name="fmt" id="fmt11" value="1:1"><label for="fmt11"><i style="width:21px;height:21px"></i>1:1</label>
+        <input type="radio" name="fmt" id="fmt34" value="3:4"><label for="fmt34"><i style="width:18px;height:24px"></i>3:4</label>
+      </div>
+      <p class="hint">Formatos mais altos mostram mais linhas, mas cobrem mais da câmera.</p>
+    </div>
+    <div class="switch">
+      <label for="mirror">Espelhar texto (para refletor)</label>
+      <input type="checkbox" id="mirror">
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-cal">
+    <h2 id="h-cal">Calibrar pelo seu ritmo</h2>
+    <p class="hint">Leia em voz alta o primeiro parágrafo, no ritmo em que você grava. A velocidade se ajusta à sua fala.</p>
+    <p class="cal-text" id="calText"></p>
+    <div class="cal-row">
+      <button type="button" id="btnCal">Comecei a ler</button>
+      <span id="calTimer" aria-live="off"></span>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-script">
+    <h2 id="h-script"><label for="script">Seu roteiro</label></h2>
+    <textarea id="script" spellcheck="true"></textarea>
+    <div class="counts"><span id="wordCount"></span><span id="savedNote">Salvo neste aparelho</span></div>
+  </section>
+
+  <section class="panel how" aria-labelledby="h-how">
+    <h2 id="h-how">Gravando com outra câmera</h2>
+    <ol>
+      <li>Ajuste letra e formato e toque em <strong>Gerar vídeo do roteiro</strong>.</li>
+      <li>Toque em <strong>Abrir janela flutuante</strong>. Ela abre pausada.</li>
+      <li>Vá para a Câmera, Blackmagic, Instagram ou TikTok e comece a gravar.</li>
+      <li>Toque na janela e em ▶. Contagem de 3 s e o texto começa a rolar.</li>
+      <li>Na janela: toque para pausar, use os botões de 15 s para voltar ou avançar e faça pinça para mudar o tamanho.</li>
+      <li>Para mudar a velocidade, toque no ícone de voltar da janela, ajuste aqui e abra de novo. A posição é mantida.</li>
+    </ol>
+    <p>A janela flutuante só abre com a página direto no Safari. Dentro de outros apps (Instagram, WhatsApp, Claude) o iOS bloqueia.</p>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.1/build/mp4-muxer.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  const FORMATS = { "16:9": [960, 540], "4:3": [800, 600], "1:1": [720, 720], "3:4": [600, 800] };
+  const FPS = 25, LEAD = 3, TAIL = 3, SKIP = 10;
+  const VIDEO_FONT = '"Atkinson Hyperlegible", system-ui, -apple-system, sans-serif';
+  const EXAMPLE = "Três coisas que eu olho antes de fechar qualquer seminovo. E a terceira quase ninguém confere.\n\nPrimeiro, o histórico de revisões. Peça o manual e as notas. Revisão feita fora da concessionária não é problema, mas precisa estar registrada.\n\nSegundo, os pneus. Se o carro tem vinte mil quilômetros e os quatro pneus são novos, pergunte o porquê.\n\nTerceiro, a consulta do chassi. Multas, restrições e sinistro aparecem ali em dois minutos.\n\nSalva esse vídeo pra usar na próxima compra. E me conta nos comentários o que você sempre confere.";
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("fc." + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("fc." + k, JSON.stringify(v)); } catch (e) { /* sem armazenamento */ } }
+  };
+
+  const cfg = {
+    script: store.get("script", EXAMPLE),
+    wpm: store.get("wpm", 130),
+    font: store.get("font", 64),
+    format: store.get("format", "16:9"),
+    mirror: store.get("mirror", false)
+  };
+  if (!FORMATS[cfg.format]) cfg.format = "16:9";
+
+  const video = $("video"), preview = $("preview"), pctx = preview.getContext("2d");
+  let rendered = null;          // { sig, wpm, url, duration }
+  let generating = false;
+
+  // ---------- texto ----------
+  const WORD_RE = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
+  const countWords = (s) => (s.match(WORD_RE) || []).length;
+
+  function layout(ctx, c) {
+    const [W, H] = FORMATS[c.format];
+    const scale = Math.min(W, H) / 540;
+    const fontPx = Math.round(c.font * scale);
+    const LH = Math.round(fontPx * 1.32);
+    const margin = Math.round(W * 0.07);
+    const maxW = W - margin * 2;
+    ctx.font = `700 ${fontPx}px ${VIDEO_FONT}`;
+    const lines = [];
+    const paras = c.script.replace(/\r/g, "").split("\n");
+    let lastBlank = true;
+    for (const raw of paras) {
+      const p = raw.trim();
+      if (!p) { if (!lastBlank) lines.push({ text: "", w: 0.6 }); lastBlank = true; continue; }
+      lastBlank = false;
+      let line = "";
+      for (const tok of p.split(/\s+/)) {
+        const test = line ? line + " " + tok : tok;
+        if (line && ctx.measureText(test).width > maxW) { lines.push({ text: line, w: Math.max(countWords(line), 0.4) }); line = tok; }
+        else line = test;
+      }
+      if (line) lines.push({ text: line, w: Math.max(countWords(line), 0.4) });
+    }
+    while (lines.length && !lines[lines.length - 1].text) lines.pop();
+    if (!lines.length) lines.push({ text: "Escreva seu roteiro para começar.", w: 5 });
+    const cum = [0];
+    for (const l of lines) cum.push(cum[cum.length - 1] + l.w);
+    return { W, H, fontPx, LH, margin, lines, cum, total: cum[cum.length - 1] };
+  }
+
+  function readSeconds(L, wpm) { return L.total * 60 / wpm; }
+
+  function drawFrame(ctx, L, c, t, wpm) {
+    const { W, H, LH, margin, lines, cum, total, fontPx } = L;
+    ctx.save();
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, W, H);
+    if (c.mirror) { ctx.translate(W, 0); ctx.scale(-1, 1); }
+
+    const pos = Math.min(Math.max((t - LEAD) * wpm / 60, 0), total);
+    let lo = 0, hi = lines.length - 1;
+    while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (cum[mid] <= pos) lo = mid; else hi = mid - 1; }
+    const i = lo;
+    const f = Math.min((pos - cum[i]) / lines[i].w, 1);
+    const scroll = (i + f) * LH;
+    const guideY = Math.round(H * 0.36);
+
+    ctx.font = `700 ${fontPx}px ${VIDEO_FONT}`;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    const first = Math.max(0, Math.floor((scroll - guideY) / LH) - 1);
+    const last = Math.min(lines.length - 1, Math.ceil((scroll + H - guideY) / LH) + 1);
+    for (let k = first; k <= last; k++) {
+      const line = lines[k];
+      if (!line.text) continue;
+      const y = guideY + (k + 0.5) * LH - scroll;
+      ctx.fillStyle = k < i ? "rgba(255,255,255,0.32)" : k === i ? "#ffffff" : "rgba(255,255,255,0.78)";
+      ctx.fillText(line.text, margin, y);
+    }
+
+    // degradês para o texto entrar e sair suavemente
+    const top = ctx.createLinearGradient(0, 0, 0, guideY * 0.75);
+    top.addColorStop(0, "rgba(0,0,0,0.92)"); top.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = top; ctx.fillRect(0, 0, W, guideY * 0.75);
+    const botStart = H * 0.78;
+    const bot = ctx.createLinearGradient(0, botStart, 0, H);
+    bot.addColorStop(0, "rgba(0,0,0,0)"); bot.addColorStop(1, "rgba(0,0,0,0.9)");
+    ctx.fillStyle = bot; ctx.fillRect(0, botStart, W, H - botStart);
+
+    // marcador da linha de leitura
+    const m = Math.max(10, Math.round(fontPx * 0.32));
+    ctx.fillStyle = "#ffb22e";
+    ctx.beginPath(); ctx.moveTo(4, guideY - m); ctx.lineTo(4 + m * 1.1, guideY); ctx.lineTo(4, guideY + m); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(W - 4, guideY - m); ctx.lineTo(W - 4 - m * 1.1, guideY); ctx.lineTo(W - 4, guideY + m); ctx.closePath(); ctx.fill();
+
+    // barra de progresso
+    const ph = Math.max(5, Math.round(H * 0.012));
+    ctx.fillStyle = "rgba(255,255,255,0.16)"; ctx.fillRect(0, H - ph, W, ph);
+    ctx.fillStyle = "#ffb22e"; ctx.fillRect(0, H - ph, W * (total ? pos / total : 0), ph);
+
+    // contagem regressiva
+    if (t < LEAD) {
+      const n = Math.ceil(LEAD - t);
+      const r = Math.min(W, H) * 0.17;
+      const cx = W / 2, cy = H * 0.68;
+      ctx.fillStyle = "rgba(0,0,0,0.72)";
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#ffb22e"; ctx.lineWidth = Math.max(4, r * 0.08);
+      ctx.beginPath(); ctx.arc(cx, cy, r * 0.88, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (1 - ((LEAD - t) % 1 || 1)));
+      ctx.stroke();
+      ctx.fillStyle = "#ffffff"; ctx.textAlign = "center";
+      ctx.font = `700 ${Math.round(r * 1.05)}px ${VIDEO_FONT}`;
+      ctx.fillText(String(n), cx, cy + r * 0.04);
+    } else if (pos >= total) {
+      ctx.fillStyle = "#ffb22e"; ctx.textAlign = "center";
+      ctx.font = `700 ${Math.round(Math.min(W, H) * 0.07)}px ${VIDEO_FONT}`;
+      ctx.fillText("FIM", W / 2, H * 0.82);
+    }
+    ctx.restore();
+  }
+
+  // ---------- estado da interface ----------
+  const sig = () => JSON.stringify([cfg.script, cfg.font, cfg.format, cfg.mirror]);
+
+  function say(text, kind) { const m = $("msg"); m.textContent = text || ""; if (kind) m.dataset.kind = kind; else delete m.dataset.kind; }
+
+  function fmtTime(s) {
+    s = Math.max(0, Math.round(s));
+    const m = Math.floor(s / 60), r = s % 60;
+    return m ? `${m} min ${String(r).padStart(2, "0")} s` : `${r} s`;
+  }
+
+  let previewQueued = false;
+  function drawPreview() {
+    if (previewQueued) return;
+    previewQueued = true;
+    requestAnimationFrame(() => {
+      previewQueued = false;
+      const [W, H] = FORMATS[cfg.format];
+      if (preview.width !== W || preview.height !== H) { preview.width = W; preview.height = H; }
+      const L = layout(pctx, cfg);
+      drawFrame(pctx, L, cfg, LEAD + 0.01, cfg.wpm);
+      $("durationLabel").textContent = `≈ ${fmtTime(readSeconds(L, cfg.wpm))} de leitura`;
+    });
+  }
+
+  function applyAspect() {
+    const [W, H] = FORMATS[cfg.format];
+    const s = $("screen").style;
+    s.setProperty("--ar", `${W} / ${H}`);
+    s.setProperty("--arn", (W / H).toFixed(4));
+  }
+
+  function inPip() {
+    return document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
+  }
+
+  function refreshState() {
+    const has = !!rendered;
+    const stale = has && rendered.sig !== sig();
+    preview.hidden = has && !stale;
+    for (const id of ["btnPip", "btnRestart", "btnBack", "btnPlay", "btnFwd"]) $(id).disabled = !has || generating;
+    $("btnGen").disabled = generating;
+    $("btnGen").textContent = generating ? "Gerando…" : has ? (stale ? "Gerar de novo com as mudanças" : "Gerar de novo") : "Gerar vídeo do roteiro";
+    const pill = $("pill");
+    if (inPip()) { pill.textContent = "Flutuando"; pill.dataset.kind = "live"; }
+    else if (stale) { pill.textContent = "Roteiro alterado"; pill.dataset.kind = "stale"; }
+    else if (has) { pill.textContent = "Pronto"; pill.dataset.kind = "ready"; }
+    else { pill.textContent = "Prévia"; delete pill.dataset.kind; }
+    $("btnPipLabel").textContent = inPip() ? "Fechar janela flutuante" : "Abrir janela flutuante";
+    const playing = has && !video.paused;
+    $("icoPlay").hidden = playing; $("icoPause").hidden = !playing;
+    $("playLabel").textContent = playing ? "Pausar" : "Rodar";
+  }
+
+  function applyRate() {
+    if (!rendered) { $("wpmHint").textContent = "Muda na hora, sem gerar o vídeo de novo."; return; }
+    const raw = cfg.wpm / rendered.wpm;
+    const rate = Math.min(Math.max(raw, 0.5), 2.5);
+    try { video.defaultPlaybackRate = rate; video.playbackRate = rate; } catch (e) { /* ignora */ }
+    $("wpmHint").textContent = raw === rate
+      ? "Muda na hora, sem gerar o vídeo de novo."
+      : "Muito longe da velocidade gerada. Gere o vídeo de novo para chegar nela.";
+  }
+
+  // ---------- geração do vídeo ----------
+  async function pickCodec(W, H) {
+    const base = { width: W, height: H, bitrate: 1_600_000, framerate: FPS, avc: { format: "avc" } };
+    for (const codec of ["avc1.42001f", "avc1.4d001f", "avc1.640028", "avc1.42002a"]) {
+      try { const r = await VideoEncoder.isConfigSupported({ ...base, codec }); if (r.supported) return { ...base, codec }; } catch (e) { /* tenta o próximo */ }
+    }
+    return null;
+  }
+
+  async function generate() {
+    if (generating) return;
+    if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
+      say("Este navegador não consegue gerar vídeo. Use o Safari com iOS 17 ou mais recente.", "error"); return;
+    }
+    if (typeof Mp4Muxer === "undefined") { say("Não carregou o gerador de MP4. Confira a internet e recarregue a página.", "error"); return; }
+    if (!countWords(cfg.script)) { say("Escreva o roteiro antes de gerar o vídeo.", "error"); return; }
+
+    generating = true; refreshState();
+    $("gen").hidden = false; $("genFill").style.width = "0%"; $("genLabel").textContent = "Preparando…";
+    say("");
+    const snap = { ...cfg };
+    try {
+      try { await document.fonts.load(`700 40px "Atkinson Hyperlegible"`); } catch (e) { /* usa a fonte do sistema */ }
+      const [W, H] = FORMATS[snap.format];
+      const canvas = document.createElement("canvas");
+      canvas.width = W; canvas.height = H;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      const L = layout(ctx, snap);
+      const duration = LEAD + readSeconds(L, snap.wpm) + TAIL;
+      const frames = Math.ceil(duration * FPS);
+
+      const config = await pickCodec(W, H);
+      if (!config) throw new Error("O codificador H.264 não está disponível neste aparelho.");
+
+      const target = new Mp4Muxer.ArrayBufferTarget();
+      const muxer = new Mp4Muxer.Muxer({
+        target, fastStart: "in-memory", firstTimestampBehavior: "offset",
+        video: { codec: "avc", width: W, height: H, frameRate: FPS }
+      });
+      let encErr = null;
+      const encoder = new VideoEncoder({
+        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        error: (e) => { encErr = e; }
+      });
+      encoder.configure(config);
+
+      const t0 = performance.now();
+      for (let n = 0; n < frames; n++) {
+        if (encErr) throw encErr;
+        drawFrame(ctx, L, snap, n / FPS, snap.wpm);
+        const frame = new VideoFrame(canvas, { timestamp: Math.round(n * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+        encoder.encode(frame, { keyFrame: n % (FPS * 2) === 0 });
+        frame.close();
+        while (encoder.encodeQueueSize > 6) await new Promise((r) => setTimeout(r, 4));
+        if (n % 20 === 0) {
+          const pct = n / frames;
+          $("genFill").style.width = (pct * 100).toFixed(1) + "%";
+          const el = (performance.now() - t0) / 1000;
+          const left = pct > 0.03 ? el / pct - el : null;
+          $("genLabel").textContent = `Gerando ${Math.round(pct * 100)}%` + (left !== null ? ` · faltam ~${fmtTime(left)}` : "");
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+      await encoder.flush();
+      if (encErr) throw encErr;
+      encoder.close();
+      muxer.finalize();
+
+      const blob = new Blob([target.buffer], { type: "video/mp4" });
+      if (rendered && rendered.url) URL.revokeObjectURL(rendered.url);
+      const url = URL.createObjectURL(blob);
+      const wasPip = inPip();
+      rendered = { sig: JSON.stringify([snap.script, snap.font, snap.format, snap.mirror]), wpm: snap.wpm, url, duration };
+      video.src = url;
+      video.load();
+      await new Promise((res) => {
+        const done = () => { video.removeEventListener("loadedmetadata", done); res(); };
+        video.addEventListener("loadedmetadata", done);
+        setTimeout(done, 4000);
+      });
+      try { video.currentTime = 0; } catch (e) { /* ignora */ }
+      applyRate();
+      $("genFill").style.width = "100%";
+      $("genLabel").textContent = `Vídeo pronto · ${fmtTime(duration)} · ${(blob.size / 1048576).toFixed(1)} MB`;
+      say(wasPip ? "Vídeo atualizado." : "Pronto. Toque em Abrir janela flutuante.", "ok");
+    } catch (e) {
+      $("gen").hidden = true;
+      say("Não deu para gerar o vídeo: " + (e && e.message ? e.message : e), "error");
+    } finally {
+      generating = false;
+      refreshState();
+    }
+  }
+
+  // ---------- janela flutuante ----------
+  async function togglePip() {
+    if (!rendered) return;
+    try {
+      if (inPip()) {
+        if (document.pictureInPictureElement && document.exitPictureInPicture) await document.exitPictureInPicture();
+        else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
+        return;
+      }
+      const startPaused = video.paused;
+      const p = video.play(); if (p && p.catch) p.catch(() => {});
+      if (video.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
+        await video.requestPictureInPicture();
+      } else if (video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode("picture-in-picture")) {
+        video.webkitSetPresentationMode("picture-in-picture");
+      } else {
+        throw new Error("unsupported");
+      }
+      if (startPaused) video.pause();
+      say("Janela aberta. Vá para a câmera e toque em ▶ na janela quando começar a gravar.", "ok");
+    } catch (e) {
+      video.pause();
+      say("O iOS não liberou a janela flutuante aqui. Abra esta página direto no Safari (não dentro de outro app) e confira Ajustes › Geral › Picture in Picture.", "error");
+    } finally { refreshState(); }
+  }
+
+  ["enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged", "play", "pause", "ended"]
+    .forEach((ev) => video.addEventListener(ev, refreshState));
+  video.addEventListener("ratechange", () => {
+    // o iOS às vezes volta a velocidade para 1 ao alternar play/pause na janela
+    if (rendered) { const want = Math.min(Math.max(cfg.wpm / rendered.wpm, 0.5), 2.5); if (Math.abs(video.playbackRate - want) > 0.01 && video.playbackRate === 1) video.playbackRate = want; }
+  });
+  video.addEventListener("play", () => { if (rendered) applyRate(); });
+
+  function seek(delta) {
+    if (!rendered) return;
+    const d = video.duration || rendered.duration;
+    video.currentTime = Math.min(Math.max(video.currentTime + delta, 0), Math.max(d - 0.1, 0));
+  }
+
+  if ("mediaSession" in navigator) {
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: "Floating Cue", artist: "Teleprompter" });
+      navigator.mediaSession.setActionHandler("play", () => video.play());
+      navigator.mediaSession.setActionHandler("pause", () => video.pause());
+      navigator.mediaSession.setActionHandler("seekbackward", (d) => seek(-((d && d.seekOffset) || SKIP)));
+      navigator.mediaSession.setActionHandler("seekforward", (d) => seek((d && d.seekOffset) || SKIP));
+    } catch (e) { /* recurso opcional */ }
+  }
+
+  // ---------- calibragem ----------
+  let calStart = 0, calTick = null;
+  function calParagraph() {
+    const p = cfg.script.replace(/\r/g, "").split(/\n\s*\n|\n/).map((s) => s.trim()).find((s) => countWords(s) >= 8) || cfg.script.trim();
+    const words = p.split(/\s+/);
+    return words.length > 70 ? words.slice(0, 70).join(" ") + "…" : p;
+  }
+  function renderCal() {
+    $("calText").textContent = calParagraph() || "Escreva o roteiro para calibrar.";
+  }
+  function toggleCal() {
+    const btn = $("btnCal");
+    if (!calStart) {
+      if (countWords(calParagraph()) < 12) { say("Para calibrar, o primeiro parágrafo precisa ter pelo menos 12 palavras.", "error"); return; }
+      calStart = performance.now();
+      btn.textContent = "Terminei";
+      $("calTimer").textContent = "0 s";
+      calTick = setInterval(() => { $("calTimer").textContent = Math.floor((performance.now() - calStart) / 1000) + " s"; }, 250);
+    } else {
+      clearInterval(calTick);
+      const sec = (performance.now() - calStart) / 1000;
+      calStart = 0;
+      btn.textContent = "Comecei a ler";
+      if (sec < 3) { $("calTimer").textContent = ""; say("Foi rápido demais. Tente de novo lendo o parágrafo inteiro.", "error"); return; }
+      const raw = countWords(calParagraph()) / (sec / 60);
+      const w = Math.min(240, Math.max(60, Math.round(raw / 5) * 5));
+      cfg.wpm = w; store.set("wpm", w);
+      $("wpm").value = w; $("wpmOut").textContent = `${w} palavras/min`;
+      applyRate(); drawPreview();
+      $("calTimer").textContent = `${Math.round(sec)} s · ${Math.round(raw)} palavras/min`;
+      say(`Velocidade ajustada para ${w} palavras/min.`, "ok");
+    }
+  }
+
+  // ---------- ligações ----------
+  function bindInputs() {
+    const wpm = $("wpm"), font = $("font"), mirror = $("mirror"), script = $("script");
+    wpm.value = cfg.wpm; font.value = cfg.font; mirror.checked = cfg.mirror; script.value = cfg.script;
+    $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
+    $("fontOut").textContent = cfg.font;
+    document.querySelectorAll('input[name="fmt"]').forEach((r) => { r.checked = r.value === cfg.format; });
+
+    wpm.addEventListener("input", () => {
+      cfg.wpm = +wpm.value; store.set("wpm", cfg.wpm);
+      $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
+      applyRate(); drawPreview();
+    });
+    font.addEventListener("input", () => {
+      cfg.font = +font.value; store.set("font", cfg.font);
+      $("fontOut").textContent = cfg.font; drawPreview(); refreshState();
+    });
+    mirror.addEventListener("change", () => { cfg.mirror = mirror.checked; store.set("mirror", cfg.mirror); drawPreview(); refreshState(); });
+    document.querySelectorAll('input[name="fmt"]').forEach((r) => r.addEventListener("change", () => {
+      if (!r.checked) return;
+      cfg.format = r.value; store.set("format", cfg.format);
+      applyAspect(); drawPreview(); refreshState();
+    }));
+    let saveTimer = null;
+    script.addEventListener("input", () => {
+      cfg.script = script.value;
+      $("wordCount").textContent = `${countWords(cfg.script)} palavras`;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => store.set("script", cfg.script), 300);
+      drawPreview(); renderCal(); refreshState();
+    });
+
+    $("btnGen").addEventListener("click", generate);
+    $("btnPip").addEventListener("click", togglePip);
+    $("btnPlay").addEventListener("click", () => { if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); } else video.pause(); });
+    $("btnBack").addEventListener("click", () => seek(-SKIP));
+    $("btnFwd").addEventListener("click", () => seek(SKIP));
+    $("btnRestart").addEventListener("click", () => { video.pause(); seek(-1e9); });
+    $("btnCal").addEventListener("click", toggleCal);
+  }
+
+  bindInputs();
+  applyAspect();
+  $("wordCount").textContent = `${countWords(cfg.script)} palavras`;
+  renderCal();
+  drawPreview();
+  refreshState();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawPreview);
+  if (typeof VideoEncoder === "undefined") say("Atenção: este navegador não gera vídeo. No iPhone, use o Safari com iOS 17 ou mais recente.", "error");
+})();
+</script>
