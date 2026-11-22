@@ -186,12 +186,13 @@ textarea {
 .how p { margin: 0; max-width: 65ch; font-size: 15px; color: var(--muted); }
 
 @media (prefers-reduced-motion: reduce) { .bar i { transition: none; } }
+[hidden] { display: none !important; }
 </style>
 
 <main class="wrap">
   <header>
     <div class="mark"><span class="tally" aria-hidden="true"></span>Floating Cue</div>
-    <p class="tag">Seu roteiro numa janela flutuante, por cima da câmera que você quiser.</p>
+    <p class="tag">Teleprompter para Chrome no computador · acompanha sua fala enquanto você grava.</p>
   </header>
 
   <section class="stage" aria-label="Teleprompter">
@@ -235,6 +236,19 @@ textarea {
 
   <section class="panel" aria-labelledby="h-ctrl">
     <h2 id="h-ctrl">Controles</h2>
+    <div class="field" style="padding:12px;border:2px solid var(--accent-fill);border-radius:12px">
+      <div class="field-head"><label for="readingMode"><strong>COMO O TEXTO AVANÇA?</strong></label></div>
+      <select id="readingMode" style="min-height:52px;padding:0 12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;width:100%;font:inherit">
+        <option value="timed">Automático · por velocidade</option>
+        <option value="voice">Por voz · acompanha minhas palavras</option>
+      </select>
+      <p class="hint">Use o modo Por voz no Chrome do computador para que o texto acompanhe sua leitura.</p>
+      <div id="voiceControls" class="field" hidden>
+        <button type="button" class="primary" id="btnListen">Ativar microfone e acompanhar fala</button>
+        <p id="voiceStatus" class="hint" role="status" aria-live="polite">Pronto para ouvir.</p>
+        <p class="hint">Autorize o microfone do Chrome. Acompanhe o roteiro na janela flutuante enquanto grava no OBS. O serviço de reconhecimento de fala é fornecido pelo navegador e exige conexão.</p>
+      </div>
+    </div>
     <div class="field">
       <div class="field-head"><label for="wpm">Velocidade</label><output id="wpmOut" for="wpm"></output></div>
       <input type="range" id="wpm" min="60" max="240" step="5">
@@ -259,18 +273,6 @@ textarea {
       <label for="mirror">Espelhar texto (para refletor)</label>
       <input type="checkbox" id="mirror">
     </div>
-    <div class="field">
-      <div class="field-head"><label for="readingMode">Avanço do texto</label></div>
-      <select id="readingMode" style="min-height:48px;padding:0 12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;width:100%">
-        <option value="timed">Por velocidade (original)</option>
-        <option value="voice">Pelas palavras que eu falar (experimental)</option>
-      </select>
-      <div id="voiceControls" class="field" hidden>
-        <button type="button" id="btnListen">Ativar microfone e acompanhar fala</button>
-        <p id="voiceStatus" class="hint" role="status" aria-live="polite">Aguardando o microfone.</p>
-        <p class="hint">Teste com o Safari aberto: o iOS pode suspender a escuta ao abrir outro app de câmera. Para gravar com outro app, use o modo Por velocidade ou teste o Floating Cue nativo. O serviço de reconhecimento é fornecido pelo navegador.</p>
-      </div>
-    </div>
   </section>
 
   <section class="panel" aria-labelledby="h-cal">
@@ -290,16 +292,15 @@ textarea {
   </section>
 
   <section class="panel how" aria-labelledby="h-how">
-    <h2 id="h-how">Gravando com outra câmera</h2>
+    <h2 id="h-how">Como usar no Chrome com OBS</h2>
     <ol>
-      <li>Ajuste letra e formato e toque em <strong>Gerar vídeo do roteiro</strong>.</li>
-      <li>Toque em <strong>Abrir janela flutuante</strong>. Ela abre pausada.</li>
-      <li>Vá para a Câmera, Blackmagic, Instagram ou TikTok e comece a gravar.</li>
-      <li>Toque na janela e em ▶. Contagem de 3 s e o texto começa a rolar.</li>
-      <li>Na janela: toque para pausar, use os botões de 15 s para voltar ou avançar e faça pinça para mudar o tamanho.</li>
-      <li>Para mudar a velocidade, toque no ícone de voltar da janela, ajuste aqui e abra de novo. A posição é mantida.</li>
+      <li>Abra este site no Chrome do computador. Cole seu roteiro e escolha <strong>Por voz · acompanha minhas palavras</strong>.</li>
+      <li>Toque em <strong>Ativar microfone</strong> e autorize a permissão do Chrome.</li>
+      <li>Abra a <strong>janela flutuante</strong> e posicione onde você consiga ler, por cima do OBS ou de outro programa.</li>
+      <li>Leia naturalmente: as palavras reconhecidas movem o roteiro; se você parar, o texto espera.</li>
+      <li>Se quiser a rolagem clássica, selecione <strong>Automático · por velocidade</strong> e gere o vídeo.</li>
     </ol>
-    <p>A janela flutuante só abre com a página direto no Safari. Dentro de outros apps (Instagram, WhatsApp, Claude) o iOS bloqueia.</p>
+    <p>O Chrome precisa de acesso ao microfone e à internet para reconhecimento de voz. O OBS pode usar o mesmo microfone, conforme as configurações de áudio do Windows.</p>
     <p id="diag"></p>
   </section>
 </main>
@@ -331,7 +332,7 @@ textarea {
   if (!FORMATS[cfg.format]) cfg.format = "16:9";
   if (!["timed","voice"].includes(cfg.mode)) cfg.mode = "timed";
 
-  const VERSION = "v3";
+  const VERSION = "v4-desktop";
 
   // Pede ao iOS que trate a mídia desta página como "ambiente", que se mistura com outros apps
   // (como a Câmera) em vez de ser interrompida por eles.
@@ -350,6 +351,8 @@ textarea {
   const video = $("video"), preview = $("preview"), pctx = preview.getContext("2d");
   let rendered = null;          // { sig, wpm, url, duration }
   let generating = false;
+  let voiceStream = null;
+  let voiceLayout = null;
 
   // ---------- texto ----------
   const WORD_RE = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
@@ -476,8 +479,9 @@ textarea {
       const [W, H] = FORMATS[cfg.format];
       if (preview.width !== W || preview.height !== H) { preview.width = W; preview.height = H; }
       const L = layout(pctx, cfg);
-      drawFrame(pctx, L, cfg, LEAD + 0.01, cfg.wpm);
-      $("durationLabel").textContent = `≈ ${fmtTime(readSeconds(L, cfg.wpm))} de leitura`;
+      if(cfg.mode==="voice") drawVoiceFrame();
+      else {drawFrame(pctx, L, cfg, LEAD + 0.01, cfg.wpm);
+      $("durationLabel").textContent = `≈ ${fmtTime(readSeconds(L, cfg.wpm))} de leitura`;}
     });
   }
 
@@ -493,9 +497,11 @@ textarea {
   }
 
   function refreshState() {
-    const has = !!rendered;
-    const stale = has && rendered.sig !== sig();
-    preview.hidden = has && !stale;
+    const voiceMode = cfg.mode==="voice";
+    const has = voiceMode ? countWords(cfg.script)>0 : !!rendered;
+    const stale = !voiceMode && has && rendered.sig !== sig();
+    preview.hidden = !voiceMode && has && !stale;
+    $("btnGen").hidden=voiceMode;
     for (const id of ["btnPip", "btnRestart", "btnBack", "btnPlay", "btnFwd"]) $(id).disabled = !has || generating;
     $("btnGen").disabled = generating;
     updateVoiceUi();
@@ -506,13 +512,14 @@ textarea {
     else if (has) { pill.textContent = "Pronto"; pill.dataset.kind = "ready"; }
     else { pill.textContent = "Prévia"; delete pill.dataset.kind; }
     $("btnPipLabel").textContent = inPip() ? "Fechar janela flutuante" : "Abrir janela flutuante";
-    const playing = has && !video.paused;
-    $("icoPlay").hidden = playing; $("icoPause").hidden = !playing;
+    const playing = !voiceMode && has && !video.paused;
+    $("icoPlay").hidden = voiceMode ? !listening : playing;
+    $("icoPause").hidden = voiceMode ? listening : !playing;
     $("playLabel").textContent = cfg.mode==="voice" ? (listening ? "Parar voz" : "Ouvir") : (playing ? "Pausar" : "Rodar");
   }
 
   function applyRate() {
-    if(cfg.mode==="voice") { $("wpmHint").textContent="No modo Voz, o texto segue as palavras reconhecidas."; return; }
+    if(cfg.mode==="voice") { $("wpmHint").textContent="Este controle só é usado no modo Automático."; return; }
     if (!rendered) { $("wpmHint").textContent = "Muda na hora, sem gerar o vídeo de novo."; return; }
     const raw = cfg.wpm / rendered.wpm;
     const rate = Math.min(Math.max(raw, 0.5), 2.5);
@@ -534,7 +541,7 @@ textarea {
   async function generate() {
     if (generating) return;
     if (typeof VideoEncoder === "undefined" || typeof VideoFrame === "undefined") {
-      say("Este navegador não consegue gerar vídeo. Use o Safari com iOS 17 ou mais recente.", "error"); return;
+      say("Este navegador não consegue gerar vídeo. Use o Chrome atualizado.", "error"); return;
     }
     if (typeof Mp4Muxer === "undefined") { say("Não carregou o gerador de MP4. Confira a internet e recarregue a página.", "error"); return; }
     if (!countWords(cfg.script)) { say("Escreva o roteiro antes de gerar o vídeo.", "error"); return; }
@@ -620,7 +627,7 @@ textarea {
 
   // ---------- janela flutuante ----------
   async function togglePip() {
-    if (!rendered) return;
+    if(cfg.mode!=="voice" && !rendered) return;
     try {
       if (inPip()) {
         if (document.pictureInPictureElement && document.exitPictureInPicture) await document.exitPictureInPicture();
@@ -628,8 +635,9 @@ textarea {
         return;
       }
       setAmbient();
+      if(cfg.mode==="voice") prepareVoiceStream();
       const startPaused = video.paused;
-      const p = video.play(); if (p && p.catch) p.catch(() => {});
+      await video.play();
       if (video.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
         await video.requestPictureInPicture();
       } else if (video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode("picture-in-picture")) {
@@ -637,11 +645,11 @@ textarea {
       } else {
         throw new Error("unsupported");
       }
-      if (startPaused) video.pause();
-      say("Janela aberta. Vá para a câmera e toque em ▶ na janela quando começar a gravar.", "ok");
+      if(startPaused && cfg.mode!=="voice") video.pause();
+      say(cfg.mode==="voice" ? "Janela aberta. Ative o microfone para acompanhar sua leitura." : "Janela aberta. Use o botão de reprodução para rolar o roteiro.", "ok");
     } catch (e) {
       video.pause();
-      say("O iOS não liberou a janela flutuante aqui. Abra esta página direto no Safari (não dentro de outro app) e confira Ajustes › Geral › Picture in Picture.", "error");
+      say("O Chrome não conseguiu abrir a janela flutuante. Confira a permissão de Picture in Picture e tente novamente.", "error");
     } finally { refreshState(); }
   }
 
@@ -649,7 +657,7 @@ textarea {
     .forEach((ev) => video.addEventListener(ev, refreshState));
   video.addEventListener("ratechange", () => {
     // o iOS às vezes volta a velocidade para 1 ao alternar play/pause na janela
-    if (rendered) { const want = Math.min(Math.max(cfg.wpm / rendered.wpm, 0.5), 2.5); if (Math.abs(video.playbackRate - want) > 0.01 && video.playbackRate === 1) video.playbackRate = want; }
+    if (cfg.mode!=="voice" && rendered) { const want = Math.min(Math.max(cfg.wpm / rendered.wpm, 0.5), 2.5); if (Math.abs(video.playbackRate - want) > 0.01 && video.playbackRate === 1) video.playbackRate = want; }
   });
   video.addEventListener("play", () => { setAmbient(); if (rendered) applyRate(); });
 
@@ -657,11 +665,11 @@ textarea {
   let hiddenAt = 0, pausedWhileHidden = false;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      if(listening) stopVoice("O Safari pode suspender o microfone em outro app. Volte aqui ou use Por velocidade.");
+      // No Chrome desktop, o microfone deve continuar ao abrir o OBS ou outra janela.
       hiddenAt = Date.now(); pausedWhileHidden = false; return;
     }
     if (hiddenAt && pausedWhileHidden && rendered) {
-      say("O iOS pausou a janela enquanto outro app estava aberto. Toque em Rodar aqui e volte para a câmera.", "error");
+      say("O Chrome pausou a reprodução da janela flutuante. Volte aqui e pressione Rodar.", "error");
     }
     hiddenAt = 0;
   });
@@ -675,6 +683,11 @@ textarea {
   video.addEventListener("webkitpresentationmodechanged", () => pipFlag(video.webkitPresentationMode === "picture-in-picture"));
 
   function seek(delta) {
+    if(cfg.mode==="voice") {
+      const deltaWords=Math.round(delta*cfg.wpm/60);
+      wordCursor=Math.min(Math.max(wordCursor+deltaWords,0),scriptWords.length);
+      drawVoiceFrame();return;
+    }
     if (!rendered) return;
     const d = video.duration || rendered.duration;
     video.currentTime = Math.min(Math.max(video.currentTime + delta, 0), Math.max(d - 0.1, 0));
@@ -696,8 +709,8 @@ textarea {
   let retries = 0, restartTimer = null;
 
   function spokenTokens(s) {
-    return (s || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")
-      .toLowerCase().match(/[\\p{L}\\p{N}]+/gu) || [];
+    const clean=(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase();
+    return (clean.match(WORD_RE)||[]).map(w=>w.replace(/['’\-]/g,""));
   }
 
   // Conversão exata entre as palavras do roteiro e a posição do MP4 já gerado.
@@ -710,13 +723,58 @@ textarea {
     return times;
   }
 
+  // O modo desktop usa o vídeo ao vivo do próprio canvas, não um MP4 com rolagem fixa.
+  function drawVoiceFrame() {
+    if(cfg.mode!=="voice")return;
+    if(!voiceLayout || !scriptWords.length)return;
+    if(preview.width!==voiceLayout.W || preview.height!==voiceLayout.H) {
+      preview.width=voiceLayout.W;preview.height=voiceLayout.H;
+    }
+    let seconds=LEAD;
+    if(wordCursor>0 && voiceWordTimes[wordCursor-1]!==undefined)
+      seconds=voiceWordTimes[wordCursor-1];
+    drawFrame(pctx,voiceLayout,cfg,seconds,cfg.wpm);
+    $("durationLabel").textContent=wordCursor+" / "+scriptWords.length+" palavras";
+  }
+  let voiceWordTimes=[];
+  function prepareVoiceStream() {
+    if(cfg.mode!=="voice")return;
+    const [W,H]=FORMATS[cfg.format];
+    preview.width=W;preview.height=H;
+    voiceLayout=layout(pctx,cfg);
+    scriptWords=spokenTokens(cfg.script);
+    voiceWordTimes=wordTimesFromLayout(voiceLayout,cfg.wpm);
+    wordCursor=Math.min(wordCursor,scriptWords.length);
+    drawVoiceFrame();
+    if(!voiceStream && typeof preview.captureStream==="function") voiceStream=preview.captureStream(15);
+    if(!voiceStream) throw new Error("Seu Chrome não oferece captura de vídeo do teleprompter.");
+    if(video.srcObject!==voiceStream) {
+      video.pause();
+      video.removeAttribute("src"); video.srcObject=voiceStream;
+      video.muted=true;
+    }
+  }
+  function selectReadingMode() {
+    stopVoice();
+    if(cfg.mode==="voice") {
+      wordCursor=0;
+      try { prepareVoiceStream(); }
+      catch(e) { say("Não foi possível preparar o modo Voz: "+e.message,"error"); }
+    } else {
+      video.pause();
+      video.srcObject=null;
+      if(rendered) {video.src=rendered.url;video.load();applyRate();}
+      preview.hidden=!!rendered && rendered.sig===sig();
+    }
+    refreshState();
+  }
   function updateVoiceUi(status) {
     $("voiceControls").hidden = cfg.mode!=="voice";
-    $("btnListen").disabled = !SpeechAPI || !rendered || rendered.sig!==sig() || generating;
+    $("btnListen").disabled = !SpeechAPI || !countWords(cfg.script) || generating;
     $("btnListen").textContent = listening ? "Parar escuta" : "Ativar microfone e acompanhar fala";
     if(status) $("voiceStatus").textContent = status;
     else if(!SpeechAPI) $("voiceStatus").textContent = "Reconhecimento de voz indisponível neste navegador.";
-    else if(!rendered || rendered.sig!==sig()) $("voiceStatus").textContent = "Gere primeiro o vídeo do roteiro atualizado.";
+    else if(!scriptWords.length) $("voiceStatus").textContent = "Cole um roteiro antes de ativar o microfone.";
     else if(!listening) $("voiceStatus").textContent = "Permita o microfone e leia o roteiro normalmente.";
   }
 
@@ -731,7 +789,7 @@ textarea {
   }
 
   function alignVoice(transcription) {
-    if(!listening || !rendered || rendered.sig!==sig()) return;
+    if(!listening || cfg.mode!=="voice") return;
     const heard=spokenTokens(transcription);
     const from=Math.max(0,wordCursor-4),to=Math.min(scriptWords.length,wordCursor+55);
     let best=null;
@@ -755,21 +813,17 @@ textarea {
     }
     if(!best || best.target<=wordCursor) return;
     wordCursor=best.target;retries=0;
-    const t=rendered.wordTimes[wordCursor-1];
-    if(Number.isFinite(t)) {
-      try {video.currentTime=Math.min(Math.max(video.currentTime,t), (video.duration||rendered.duration)-0.1)}catch(e){}
-    }
+    drawVoiceFrame();
     updateVoiceUi("Acompanhando sua fala · "+wordCursor+" de "+scriptWords.length+" palavras");
     if(wordCursor>=scriptWords.length) stopVoice("Roteiro concluído.");
   }
 
   function startVoice() {
     if(!SpeechAPI) {updateVoiceUi("Este navegador não permite reconhecimento de voz.");return}
-    if(!rendered || rendered.sig!==sig()) {updateVoiceUi("Gere o vídeo atualizado antes.");return}
-    scriptWords=spokenTokens(cfg.script);
-    wordCursor=rendered.wordTimes.filter(t=>t<=video.currentTime+0.06).length;
-    if(wordCursor>=scriptWords.length) {wordCursor=0;try{video.currentTime=LEAD}catch(e){}}
-    video.pause();retries=0;listening=true;
+    try { prepareVoiceStream(); } catch(e) { updateVoiceUi(e.message); return; }
+    if(wordCursor>=scriptWords.length)wordCursor=0;
+    drawVoiceFrame();
+    retries=0;listening=true;
     recognition=new SpeechAPI();
     const r=recognition;
     r.lang="pt-BR";r.interimResults=true;r.continuous=true;r.maxAlternatives=1;
@@ -777,19 +831,19 @@ textarea {
       if(!listening)return;
       const parts=[];
       for(let i=0;i<ev.results.length;i++) if(ev.results[i][0]) parts.push(ev.results[i][0].transcript);
+      if(parts.length) retries=0;
       alignVoice(parts.join(" "));
     };
     r.onerror=ev=>{
       if(!listening)return;
       if(ev.error==="no-speech")return;
       stopVoice(["not-allowed","service-not-allowed"].includes(ev.error)
-        ?"Autorize microfone e reconhecimento de fala nos ajustes do Safari."
+        ?"Autorize microfone e reconhecimento de fala nas permissões do Chrome."
         :"Escuta interrompida ("+ev.error+"). Toque para tentar de novo.");
     };
     r.onend=()=>{
       if(!listening||recognition!==r)return;
-      if(document.hidden) {stopVoice("O iOS suspendeu a escuta em segundo plano.");return}
-      if(retries++>=3) {stopVoice("O Safari encerrou a escuta. Toque para reativar.");return}
+      if(retries++>=3) {stopVoice("O Chrome encerrou a escuta. Toque para reativar.");return}
       restartTimer=setTimeout(()=>{
         if(!listening||recognition!==r)return;
         try{r.start()}catch(e){stopVoice("Não foi possível retomar a escuta.")}
@@ -845,8 +899,7 @@ textarea {
     $("readingMode").value=cfg.mode;
     $("readingMode").addEventListener("change",()=>{
       stopVoice();cfg.mode=$("readingMode").value;store.set("mode",cfg.mode);
-      if(cfg.mode==="voice")video.pause();
-      applyRate();refreshState();
+      selectReadingMode();applyRate();
     });
     $("btnListen").addEventListener("click",toggleVoice);
     $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
@@ -855,23 +908,26 @@ textarea {
 
     wpm.addEventListener("input", () => {
       cfg.wpm = +wpm.value; store.set("wpm", cfg.wpm);
+      if(cfg.mode==="voice") {voiceLayout=layout(pctx,cfg);voiceWordTimes=wordTimesFromLayout(voiceLayout,cfg.wpm);drawVoiceFrame();}
       $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
       applyRate(); drawPreview();
     });
     font.addEventListener("input", () => {
       cfg.font = +font.value; store.set("font", cfg.font);
+      if(cfg.mode==="voice") prepareVoiceStream();
       $("fontOut").textContent = cfg.font; drawPreview(); refreshState();
     });
-    mirror.addEventListener("change", () => { cfg.mirror = mirror.checked; store.set("mirror", cfg.mirror); drawPreview(); refreshState(); });
+    mirror.addEventListener("change", () => { cfg.mirror = mirror.checked; store.set("mirror", cfg.mirror); if(cfg.mode==="voice")prepareVoiceStream(); drawPreview(); refreshState(); });
     document.querySelectorAll('input[name="fmt"]').forEach((r) => r.addEventListener("change", () => {
       if (!r.checked) return;
       cfg.format = r.value; store.set("format", cfg.format);
-      applyAspect(); drawPreview(); refreshState();
+      applyAspect(); if(cfg.mode==="voice")prepareVoiceStream(); drawPreview(); refreshState();
     }));
     let saveTimer = null;
     script.addEventListener("input", () => {
       if(listening)stopVoice("O roteiro mudou. Gere novamente para ativar a voz.");
       cfg.script = script.value;
+      if(cfg.mode==="voice"){wordCursor=0;prepareVoiceStream();}
       $("wordCount").textContent = `${countWords(cfg.script)} palavras`;
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => store.set("script", cfg.script), 300);
@@ -883,19 +939,20 @@ textarea {
     $("btnPlay").addEventListener("click", () => { if(cfg.mode==="voice"){toggleVoice();return} if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); } else video.pause(); });
     $("btnBack").addEventListener("click", () => seek(-SKIP));
     $("btnFwd").addEventListener("click", () => seek(SKIP));
-    $("btnRestart").addEventListener("click", () => { stopVoice(); video.pause(); seek(-1e9); });
+    $("btnRestart").addEventListener("click", () => {stopVoice(); if(cfg.mode==="voice"){wordCursor=0;drawVoiceFrame();}else{video.pause();seek(-1e9);} });
     $("btnCal").addEventListener("click", toggleCal);
   }
 
   bindInputs();
   applyAspect();
+  if(cfg.mode==="voice")selectReadingMode();
   $("wordCount").textContent = `${countWords(cfg.script)} palavras`;
   renderCal();
   drawPreview();
   refreshState();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(drawPreview);
   setAmbient();
-  if (tabWasKilled) say("Diagnóstico: o iOS fechou esta aba enquanto a janela flutuante estava aberta (a página recarregou).", "error");
-  else if (typeof VideoEncoder === "undefined") say("Atenção: este navegador não gera vídeo. No iPhone, use o Safari com iOS 17 ou mais recente.", "error");
+  if (tabWasKilled) say("O navegador fechou a janela flutuante ao recarregar a página.", "error");
+  else if (typeof VideoEncoder === "undefined" && cfg.mode==="timed") say("Para gerar vídeo no modo Automático, use uma versão recente do Chrome.", "error");
 })();
 </script>
