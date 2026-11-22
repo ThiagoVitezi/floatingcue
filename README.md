@@ -1,8 +1,8 @@
 # Floating Cue
 
-Teleprompter flutuante para iPhone que roda no Safari. O roteiro vira um vídeo MP4 gerado no próprio aparelho e abre na janela Picture in Picture do iOS, por cima de qualquer app de câmera.
+Teleprompter flutuante para Chrome no computador (com acompanhamento por voz) e Safari no iPhone (com rolagem por velocidade). No Chrome, o modo voz renderiza a janela Picture in Picture ao vivo, sem gerar MP4.
 
-**Abrir:** https://thiagovitezi.github.io/floatingcue/ (no Safari do iPhone, iOS 17+)
+**Abrir:** https://thiagovitezi.github.io/floatingcue/ (preferencialmente Chrome atualizado no desktop)
 
 - Velocidade ajustável na hora, sem gerar o vídeo de novo
 - Tamanho da letra, formato da janela (16:9, 4:3, 1:1, 3:4) e espelhamento
@@ -12,10 +12,16 @@ Teleprompter flutuante para iPhone que roda no Safari. O roteiro vira um vídeo 
 
 O roteiro e as configurações ficam salvos só no aparelho (localStorage).
 
-## Acompanhamento por voz (experimental)
+## Modo voz no Chrome desktop
 
-Em **Controles > Avanço do texto**, escolha **Pelas palavras que eu falar**. Gere o vídeo do roteiro e toque em **Ativar microfone e acompanhar fala**. Autorize o microfone e leia em português brasileiro. O sistema tenta encontrar as palavras ditas no roteiro e posicionar o vídeo no trecho correspondente, sem avançar sozinho durante o silêncio.
+1. Abra a página no Chrome e cole seu roteiro.
+2. Em **Controles > COMO O TEXTO AVANÇA?**, selecione **Por voz · acompanha minhas palavras**.
+3. Clique em **Ativar microfone e acompanhar fala** e permita acesso ao microfone do Chrome.
+4. Clique em **Abrir janela flutuante** e posicione-a por cima do OBS ou outro programa. Se necessário, pode abrir primeiro o PiP e então ativar o microfone pela página.
+5. Fale normalmente. O reconhecimento de fala pt-BR tenta alinhar o que você diz às palavras do roteiro e atualiza o quadro do PiP. Enquanto você não fala, a posição permanece parada.
 
-O modo **Por velocidade** continua disponível. O reconhecimento usa a API de fala do navegador, quando suportada, e pode depender do serviço de reconhecimento oferecido pelo próprio navegador.
+O modo por voz usa a Web Speech API do Chrome (conforme disponibilidade do navegador e serviço de reconhecimento) e necessita de microfone e conexão de rede. **Não é necessário gerar MP4** nesse modo. A gravação pelo OBS continua independente. A página do Floating Cue deve ficar aberta enquanto você grava.
 
-**Limitação importante no iPhone:** ao sair do Safari para gravar com a Câmera, Instagram ou outro app, o iOS pode interromper a captura de microfone do Safari. Portanto, o modo por voz não é garantido na janela flutuante enquanto outro app grava. Nessa situação, use a rolagem por velocidade ou teste o projeto nativo [FloatingCue-iOS](https://github.com/ThiagoVitezi/FloatingCue-iOS), cujo modo por voz também é experimental. O reconhecimento por voz foi incluído no código, mas ainda precisa ser validado no Safari de um iPhone real.
+Para o modo de rolagem por tempo, selecione **Automático · por velocidade** e use **Gerar vídeo do roteiro** como anteriormente.
+
+**Limitações:** o reconhecimento pode falhar com ruído, palavras diferentes do roteiro, falhas de rede ou permissões bloqueadas. O modo voz está implementado, mas precisa de validação com Chrome + microfone + OBS em uma máquina real. No iPhone, o navegador pode suspender o microfone ao alternar para a câmera de outro app.
