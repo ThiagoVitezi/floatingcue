@@ -259,6 +259,18 @@ textarea {
       <label for="mirror">Espelhar texto (para refletor)</label>
       <input type="checkbox" id="mirror">
     </div>
+    <div class="field">
+      <div class="field-head"><label for="readingMode">Avanço do texto</label></div>
+      <select id="readingMode" style="min-height:48px;padding:0 12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;width:100%">
+        <option value="timed">Por velocidade (original)</option>
+        <option value="voice">Pelas palavras que eu falar (experimental)</option>
+      </select>
+      <div id="voiceControls" class="field" hidden>
+        <button type="button" id="btnListen">Ativar microfone e acompanhar fala</button>
+        <p id="voiceStatus" class="hint" role="status" aria-live="polite">Aguardando o microfone.</p>
+        <p class="hint">Teste com o Safari aberto: o iOS pode suspender a escuta ao abrir outro app de câmera. Para gravar com outro app, use o modo Por velocidade ou teste o Floating Cue nativo. O serviço de reconhecimento é fornecido pelo navegador.</p>
+      </div>
+    </div>
   </section>
 
   <section class="panel" aria-labelledby="h-cal">
@@ -313,11 +325,13 @@ textarea {
     wpm: store.get("wpm", 130),
     font: store.get("font", 64),
     format: store.get("format", "16:9"),
-    mirror: store.get("mirror", false)
+    mirror: store.get("mirror", false),
+    mode: store.get("mode", "timed")
   };
   if (!FORMATS[cfg.format]) cfg.format = "16:9";
+  if (!["timed","voice"].includes(cfg.mode)) cfg.mode = "timed";
 
-  const VERSION = "v2";
+  const VERSION = "v3";
 
   // Pede ao iOS que trate a mídia desta página como "ambiente", que se mistura com outros apps
   // (como a Câmera) em vez de ser interrompida por eles.
@@ -484,6 +498,7 @@ textarea {
     preview.hidden = has && !stale;
     for (const id of ["btnPip", "btnRestart", "btnBack", "btnPlay", "btnFwd"]) $(id).disabled = !has || generating;
     $("btnGen").disabled = generating;
+    updateVoiceUi();
     $("btnGen").textContent = generating ? "Gerando…" : has ? (stale ? "Gerar de novo com as mudanças" : "Gerar de novo") : "Gerar vídeo do roteiro";
     const pill = $("pill");
     if (inPip()) { pill.textContent = "Flutuando"; pill.dataset.kind = "live"; }
@@ -493,10 +508,11 @@ textarea {
     $("btnPipLabel").textContent = inPip() ? "Fechar janela flutuante" : "Abrir janela flutuante";
     const playing = has && !video.paused;
     $("icoPlay").hidden = playing; $("icoPause").hidden = !playing;
-    $("playLabel").textContent = playing ? "Pausar" : "Rodar";
+    $("playLabel").textContent = cfg.mode==="voice" ? (listening ? "Parar voz" : "Ouvir") : (playing ? "Pausar" : "Rodar");
   }
 
   function applyRate() {
+    if(cfg.mode==="voice") { $("wpmHint").textContent="No modo Voz, o texto segue as palavras reconhecidas."; return; }
     if (!rendered) { $("wpmHint").textContent = "Muda na hora, sem gerar o vídeo de novo."; return; }
     const raw = cfg.wpm / rendered.wpm;
     const rate = Math.min(Math.max(raw, 0.5), 2.5);
@@ -523,6 +539,7 @@ textarea {
     if (typeof Mp4Muxer === "undefined") { say("Não carregou o gerador de MP4. Confira a internet e recarregue a página.", "error"); return; }
     if (!countWords(cfg.script)) { say("Escreva o roteiro antes de gerar o vídeo.", "error"); return; }
 
+    stopVoice();
     generating = true; refreshState();
     $("gen").hidden = false; $("genFill").style.width = "0%"; $("genLabel").textContent = "Preparando…";
     say("");
@@ -534,6 +551,7 @@ textarea {
       canvas.width = W; canvas.height = H;
       const ctx = canvas.getContext("2d", { alpha: false });
       const L = layout(ctx, snap);
+      const wordTimes = wordTimesFromLayout(L,snap.wpm);
       const duration = LEAD + readSeconds(L, snap.wpm) + TAIL;
       const frames = Math.ceil(duration * FPS);
 
@@ -578,7 +596,7 @@ textarea {
       if (rendered && rendered.url) URL.revokeObjectURL(rendered.url);
       const url = URL.createObjectURL(blob);
       const wasPip = inPip();
-      rendered = { sig: JSON.stringify([snap.script, snap.font, snap.format, snap.mirror]), wpm: snap.wpm, url, duration };
+      rendered = { sig: JSON.stringify([snap.script, snap.font, snap.format, snap.mirror]), wpm: snap.wpm, url, duration, wordTimes };
       video.src = url;
       video.load();
       await new Promise((res) => {
@@ -638,7 +656,10 @@ textarea {
   // Diagnóstico: registra se o vídeo foi interrompido enquanto a página estava em segundo plano.
   let hiddenAt = 0, pausedWhileHidden = false;
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) { hiddenAt = Date.now(); pausedWhileHidden = false; return; }
+    if (document.hidden) {
+      if(listening) stopVoice("O Safari pode suspender o microfone em outro app. Volte aqui ou use Por velocidade.");
+      hiddenAt = Date.now(); pausedWhileHidden = false; return;
+    }
     if (hiddenAt && pausedWhileHidden && rendered) {
       say("O iOS pausou a janela enquanto outro app estava aberto. Toque em Rodar aqui e volte para a câmera.", "error");
     }
@@ -667,6 +688,120 @@ textarea {
       navigator.mediaSession.setActionHandler("seekbackward", (d) => seek(-((d && d.seekOffset) || SKIP)));
       navigator.mediaSession.setActionHandler("seekforward", (d) => seek((d && d.seekOffset) || SKIP));
     } catch (e) { /* recurso opcional */ }
+  }
+
+  // ---------- avanço conforme as palavras faladas ----------
+  const SpeechAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null, listening = false, scriptWords = [], wordCursor = 0;
+  let retries = 0, restartTimer = null;
+
+  function spokenTokens(s) {
+    return (s || "").normalize("NFD").replace(/[\\u0300-\\u036f]/g,"")
+      .toLowerCase().match(/[\\p{L}\\p{N}]+/gu) || [];
+  }
+
+  // Conversão exata entre as palavras do roteiro e a posição do MP4 já gerado.
+  function wordTimesFromLayout(L,wpm) {
+    const times = [];
+    L.lines.forEach((line,i) => {
+      const count=countWords(line.text);
+      for(let n=1;n<=count;n++) times.push(LEAD+(L.cum[i]+n)*60/wpm);
+    });
+    return times;
+  }
+
+  function updateVoiceUi(status) {
+    $("voiceControls").hidden = cfg.mode!=="voice";
+    $("btnListen").disabled = !SpeechAPI || !rendered || rendered.sig!==sig() || generating;
+    $("btnListen").textContent = listening ? "Parar escuta" : "Ativar microfone e acompanhar fala";
+    if(status) $("voiceStatus").textContent = status;
+    else if(!SpeechAPI) $("voiceStatus").textContent = "Reconhecimento de voz indisponível neste navegador.";
+    else if(!rendered || rendered.sig!==sig()) $("voiceStatus").textContent = "Gere primeiro o vídeo do roteiro atualizado.";
+    else if(!listening) $("voiceStatus").textContent = "Permita o microfone e leia o roteiro normalmente.";
+  }
+
+  function stopVoice(status) {
+    listening=false; clearTimeout(restartTimer); restartTimer=null;
+    const current=recognition; recognition=null;
+    if(current) {
+      current.onend=null;current.onerror=null;current.onresult=null;
+      try { current.stop(); } catch(e) {}
+    }
+    updateVoiceUi(status);
+  }
+
+  function alignVoice(transcription) {
+    if(!listening || !rendered || rendered.sig!==sig()) return;
+    const heard=spokenTokens(transcription);
+    const from=Math.max(0,wordCursor-4),to=Math.min(scriptWords.length,wordCursor+55);
+    let best=null;
+    for(let len=Math.min(6,heard.length);len>=2;len--) {
+      const frag=heard.slice(-len);
+      for(let i=from;i+len<=to;i++) {
+        if(i+len<=wordCursor || (i-wordCursor>12 && len<3)) continue;
+        let match=true;
+        for(let j=0;j<len;j++) if(scriptWords[i+j]!==frag[j]) {match=false;break}
+        if(!match) continue;
+        const score=len*14-Math.max(i-wordCursor,0)*1.4-Math.max(wordCursor-i,0)*0.5;
+        if(!best||score>best.score) best={target:i+len,score};
+      }
+    }
+    // Destrava com uma palavra única próxima, sem pular para uma repetição distante.
+    if(!best && heard.length) {
+      const nearby=[];
+      for(let i=wordCursor;i<Math.min(wordCursor+5,scriptWords.length);i++)
+        if(scriptWords[i]===heard[heard.length-1]) nearby.push(i);
+      if(nearby.length===1) best={target:nearby[0]+1,score:0};
+    }
+    if(!best || best.target<=wordCursor) return;
+    wordCursor=best.target;retries=0;
+    const t=rendered.wordTimes[wordCursor-1];
+    if(Number.isFinite(t)) {
+      try {video.currentTime=Math.min(Math.max(video.currentTime,t), (video.duration||rendered.duration)-0.1)}catch(e){}
+    }
+    updateVoiceUi("Acompanhando sua fala · "+wordCursor+" de "+scriptWords.length+" palavras");
+    if(wordCursor>=scriptWords.length) stopVoice("Roteiro concluído.");
+  }
+
+  function startVoice() {
+    if(!SpeechAPI) {updateVoiceUi("Este navegador não permite reconhecimento de voz.");return}
+    if(!rendered || rendered.sig!==sig()) {updateVoiceUi("Gere o vídeo atualizado antes.");return}
+    scriptWords=spokenTokens(cfg.script);
+    wordCursor=rendered.wordTimes.filter(t=>t<=video.currentTime+0.06).length;
+    if(wordCursor>=scriptWords.length) {wordCursor=0;try{video.currentTime=LEAD}catch(e){}}
+    video.pause();retries=0;listening=true;
+    recognition=new SpeechAPI();
+    const r=recognition;
+    r.lang="pt-BR";r.interimResults=true;r.continuous=true;r.maxAlternatives=1;
+    r.onresult=ev=>{
+      if(!listening)return;
+      const parts=[];
+      for(let i=0;i<ev.results.length;i++) if(ev.results[i][0]) parts.push(ev.results[i][0].transcript);
+      alignVoice(parts.join(" "));
+    };
+    r.onerror=ev=>{
+      if(!listening)return;
+      if(ev.error==="no-speech")return;
+      stopVoice(["not-allowed","service-not-allowed"].includes(ev.error)
+        ?"Autorize microfone e reconhecimento de fala nos ajustes do Safari."
+        :"Escuta interrompida ("+ev.error+"). Toque para tentar de novo.");
+    };
+    r.onend=()=>{
+      if(!listening||recognition!==r)return;
+      if(document.hidden) {stopVoice("O iOS suspendeu a escuta em segundo plano.");return}
+      if(retries++>=3) {stopVoice("O Safari encerrou a escuta. Toque para reativar.");return}
+      restartTimer=setTimeout(()=>{
+        if(!listening||recognition!==r)return;
+        try{r.start()}catch(e){stopVoice("Não foi possível retomar a escuta.")}
+      },650);
+    };
+    try{r.start();updateVoiceUi("Aguardando sua fala em português...")}
+    catch(e){stopVoice("Não foi possível iniciar o microfone: "+e.message)}
+  }
+
+  function toggleVoice() {
+    if(listening)stopVoice("Escuta encerrada. Sua posição foi mantida.");
+    else startVoice();
   }
 
   // ---------- calibragem ----------
@@ -707,6 +842,13 @@ textarea {
   function bindInputs() {
     const wpm = $("wpm"), font = $("font"), mirror = $("mirror"), script = $("script");
     wpm.value = cfg.wpm; font.value = cfg.font; mirror.checked = cfg.mirror; script.value = cfg.script;
+    $("readingMode").value=cfg.mode;
+    $("readingMode").addEventListener("change",()=>{
+      stopVoice();cfg.mode=$("readingMode").value;store.set("mode",cfg.mode);
+      if(cfg.mode==="voice")video.pause();
+      applyRate();refreshState();
+    });
+    $("btnListen").addEventListener("click",toggleVoice);
     $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
     $("fontOut").textContent = cfg.font;
     document.querySelectorAll('input[name="fmt"]').forEach((r) => { r.checked = r.value === cfg.format; });
@@ -728,6 +870,7 @@ textarea {
     }));
     let saveTimer = null;
     script.addEventListener("input", () => {
+      if(listening)stopVoice("O roteiro mudou. Gere novamente para ativar a voz.");
       cfg.script = script.value;
       $("wordCount").textContent = `${countWords(cfg.script)} palavras`;
       clearTimeout(saveTimer);
@@ -737,10 +880,10 @@ textarea {
 
     $("btnGen").addEventListener("click", generate);
     $("btnPip").addEventListener("click", togglePip);
-    $("btnPlay").addEventListener("click", () => { if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); } else video.pause(); });
+    $("btnPlay").addEventListener("click", () => { if(cfg.mode==="voice"){toggleVoice();return} if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); } else video.pause(); });
     $("btnBack").addEventListener("click", () => seek(-SKIP));
     $("btnFwd").addEventListener("click", () => seek(SKIP));
-    $("btnRestart").addEventListener("click", () => { video.pause(); seek(-1e9); });
+    $("btnRestart").addEventListener("click", () => { stopVoice(); video.pause(); seek(-1e9); });
     $("btnCal").addEventListener("click", toggleCal);
   }
 
