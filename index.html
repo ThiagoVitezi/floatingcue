@@ -220,7 +220,7 @@ textarea {
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z"/></svg>Início
       </button>
       <button type="button" id="btnBack" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>−10 s
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg><span id="backLabel">−10 s</span>
       </button>
       <button type="button" id="btnPlay" class="play" disabled>
         <svg id="icoPlay" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>
@@ -228,7 +228,7 @@ textarea {
         <span id="playLabel">Rodar</span>
       </button>
       <button type="button" id="btnFwd" disabled>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/></svg>+10 s
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v4h-4"/></svg><span id="fwdLabel">+10 s</span>
       </button>
     </div>
     <p class="msg" id="msg" role="status" aria-live="polite"></p>
@@ -244,6 +244,15 @@ textarea {
       </select>
       <p class="hint">Use o modo Por voz no Chrome do computador para que o texto acompanhe sua leitura.</p>
       <div id="voiceControls" class="field" hidden>
+        <div class="field">
+          <label for="voiceStep">Quantas palavras avançar com cada seta?</label>
+          <select id="voiceStep" style="min-height:44px;padding:0 12px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:10px;width:100%;font:inherit">
+            <option value="5">5 palavras · ajuste fino</option>
+            <option value="10">10 palavras · padrão</option>
+            <option value="20">20 palavras · salto maior</option>
+          </select>
+          <p class="hint">Use ← e → para corrigir a leitura; Shift + seta pula 3 vezes mais. Funciona nos botões da janela flutuante mesmo com a voz ativa.</p>
+        </div>
         <button type="button" class="primary" id="btnListen">Ativar microfone e acompanhar fala</button>
         <p id="voiceStatus" class="hint" role="status" aria-live="polite">Pronto para ouvir.</p>
         <p class="hint">Autorize o microfone do Chrome. Acompanhe o roteiro na janela flutuante enquanto grava no OBS. O serviço de reconhecimento de fala é fornecido pelo navegador e exige conexão.</p>
@@ -298,6 +307,7 @@ textarea {
       <li>Toque em <strong>Ativar microfone</strong> e autorize a permissão do Chrome.</li>
       <li>Abra a <strong>janela flutuante</strong> e posicione onde você consiga ler, por cima do OBS ou de outro programa.</li>
       <li>Leia naturalmente: as palavras reconhecidas movem o roteiro; se você parar, o texto espera.</li>
+      <li>Corrija o ponto da leitura com ← e → no teclado ou nas setas da janela flutuante, mesmo com o microfone ativo. Shift + seta avança mais palavras.</li>
       <li>Se quiser a rolagem clássica, selecione <strong>Automático · por velocidade</strong> e gere o vídeo.</li>
     </ol>
     <p>O Chrome precisa de acesso ao microfone e à internet para reconhecimento de voz. O OBS pode usar o mesmo microfone, conforme as configurações de áudio do Windows.</p>
@@ -327,12 +337,14 @@ textarea {
     font: store.get("font", 64),
     format: store.get("format", "16:9"),
     mirror: store.get("mirror", false),
-    mode: store.get("mode", "timed")
+    mode: store.get("mode", "timed"),
+    voiceStep: store.get("voiceStep", 10)
   };
   if (!FORMATS[cfg.format]) cfg.format = "16:9";
   if (!["timed","voice"].includes(cfg.mode)) cfg.mode = "timed";
+  if (![5,10,20].includes(cfg.voiceStep)) cfg.voiceStep = 10;
 
-  const VERSION = "v4-desktop";
+  const VERSION = "v5-voice-arrows";
 
   // Pede ao iOS que trate a mídia desta página como "ambiente", que se mistura com outros apps
   // (como a Câmera) em vez de ser interrompida por eles.
@@ -353,6 +365,7 @@ textarea {
   let generating = false;
   let voiceStream = null;
   let voiceLayout = null;
+  let pipWindow = null; // Janela Document Picture-in-Picture com controles próprios no Chrome desktop.
 
   // ---------- texto ----------
   const WORD_RE = /[\p{L}\p{N}]+(?:['’\-][\p{L}\p{N}]+)*/gu;
@@ -493,7 +506,7 @@ textarea {
   }
 
   function inPip() {
-    return document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
+    return !!(pipWindow && !pipWindow.closed) || document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
   }
 
   function refreshState() {
@@ -512,6 +525,8 @@ textarea {
     else if (has) { pill.textContent = "Pronto"; pill.dataset.kind = "ready"; }
     else { pill.textContent = "Prévia"; delete pill.dataset.kind; }
     $("btnPipLabel").textContent = inPip() ? "Fechar janela flutuante" : "Abrir janela flutuante";
+    $("backLabel").textContent = voiceMode ? "← " + cfg.voiceStep + " palavras" : "−10 s";
+    $("fwdLabel").textContent = voiceMode ? cfg.voiceStep + " palavras →" : "+10 s";
     const playing = !voiceMode && has && !video.paused;
     $("icoPlay").hidden = voiceMode ? !listening : playing;
     $("icoPause").hidden = voiceMode ? listening : !playing;
@@ -626,16 +641,82 @@ textarea {
   }
 
   // ---------- janela flutuante ----------
+  // Document Picture-in-Picture é uma janela HTML real: os botões e as setas do
+  // teclado funcionam dentro dela, ao contrário dos controles nativos de vídeo.
+  function updateFloatingControls() {
+    if (!pipWindow || pipWindow.closed) return;
+    const d = pipWindow.document;
+    const progress = d.getElementById("fcFloatProgress");
+    const listen = d.getElementById("fcFloatListen");
+    const back = d.getElementById("fcFloatBack");
+    const forward = d.getElementById("fcFloatForward");
+    const help = d.getElementById("fcFloatHelp");
+    if (progress) progress.textContent = wordCursor + " / " + scriptWords.length + " palavras";
+    if (listen) {
+      listen.textContent = listening ? "● Ouvindo · pausar" : "▶ Ativar voz";
+      listen.setAttribute("aria-pressed", String(listening));
+    }
+    if (back) back.textContent = "← " + cfg.voiceStep;
+    if (forward) forward.textContent = cfg.voiceStep + " →";
+    if (help) help.textContent = "← / →: " + cfg.voiceStep + " palavras · Shift: " + (cfg.voiceStep * 3);
+  }
+
+  async function openVoiceWindow() {
+    const [W, H] = FORMATS[cfg.format];
+    const width = 500;
+    const height = Math.round(width * H / W) + 94;
+    const win = await window.documentPictureInPicture.requestWindow({ width, height });
+    pipWindow = win;
+    win.document.title = "Floating Cue · leitura por voz";
+    const css = win.document.createElement("style");
+    css.textContent = "*,*::before,*::after{box-sizing:border-box}" +
+      "html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0e1218;color:#e7ebf1;font:14px system-ui,sans-serif}" +
+      "main{height:100%;display:flex;flex-direction:column}" +
+      "video{display:block;width:100%;flex:1 1 auto;min-height:0;object-fit:contain;background:#000}" +
+      ".bar{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:7px;background:#171c25}" +
+      "button{border:1px solid #454d5b;border-radius:9px;background:#29313f;color:#fff;font:700 13px system-ui;cursor:pointer;min-height:42px;padding:5px 11px}" +
+      "button:focus-visible{outline:2px solid #ffb22e;outline-offset:1px}" +
+      "button:active{background:#ffb22e;color:#111}" +
+      "#fcFloatListen{flex:1;max-width:180px;background:#ffb22e;border-color:#ffb22e;color:#1d1303}" +
+      ".foot{display:flex;justify-content:space-between;gap:8px;padding:1px 9px 5px;color:#aab4c2;font-size:11px;white-space:nowrap}";
+    win.document.head.appendChild(css);
+    win.document.body.innerHTML = '<main>' +
+      '<video id="fcFloatVideo" autoplay muted playsinline aria-label="Teleprompter ao vivo"></video>' +
+      '<div class="bar"><button type="button" id="fcFloatBack" aria-label="Voltar palavras">←</button>' +
+      '<button type="button" id="fcFloatListen" aria-label="Ativar ou pausar voz">▶ Ativar voz</button>' +
+      '<button type="button" id="fcFloatForward" aria-label="Avançar palavras">→</button></div>' +
+      '<div class="foot"><span id="fcFloatProgress"></span><span id="fcFloatHelp"></span></div></main>';
+    const floatVideo = win.document.getElementById("fcFloatVideo");
+    floatVideo.srcObject = voiceStream;
+    floatVideo.play().catch(() => {});
+    win.document.getElementById("fcFloatBack").addEventListener("click", () => seek(-SKIP));
+    win.document.getElementById("fcFloatForward").addEventListener("click", () => seek(SKIP));
+    win.document.getElementById("fcFloatListen").addEventListener("click", toggleVoice);
+    win.document.addEventListener("keydown", handleArrowKeys, true);
+    win.addEventListener("pagehide", () => {
+      if (pipWindow === win) { pipWindow = null; pipFlag(false); refreshState(); }
+    });
+    pipFlag(true);
+    updateFloatingControls();
+  }
+
   async function togglePip() {
     if(cfg.mode!=="voice" && !rendered) return;
     try {
       if (inPip()) {
-        if (document.pictureInPictureElement && document.exitPictureInPicture) await document.exitPictureInPicture();
+        if (pipWindow && !pipWindow.closed) pipWindow.close();
+        else if (document.pictureInPictureElement && document.exitPictureInPicture) await document.exitPictureInPicture();
         else if (video.webkitSetPresentationMode) video.webkitSetPresentationMode("inline");
         return;
       }
       setAmbient();
       if(cfg.mode==="voice") prepareVoiceStream();
+      if (cfg.mode==="voice" && window.documentPictureInPicture && window.documentPictureInPicture.requestWindow) {
+        await openVoiceWindow();
+        say("Janela aberta. Use as setas para corrigir a leitura mesmo com a voz ativa.", "ok");
+        return;
+      }
+      // Fallback para navegadores sem Document PiP: mídia nativa e Media Session.
       const startPaused = video.paused;
       await video.play();
       if (video.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
@@ -646,9 +727,9 @@ textarea {
         throw new Error("unsupported");
       }
       if(startPaused && cfg.mode!=="voice") video.pause();
-      say(cfg.mode==="voice" ? "Janela aberta. Ative o microfone para acompanhar sua leitura." : "Janela aberta. Use o botão de reprodução para rolar o roteiro.", "ok");
+      say(cfg.mode==="voice" ? "Janela aberta. As setas da página continuam disponíveis." : "Janela aberta. Use o botão de reprodução para rolar o roteiro.", "ok");
     } catch (e) {
-      video.pause();
+      if (!pipWindow) video.pause();
       say("O Chrome não conseguiu abrir a janela flutuante. Confira a permissão de Picture in Picture e tente novamente.", "error");
     } finally { refreshState(); }
   }
@@ -682,22 +763,50 @@ textarea {
   video.addEventListener("leavepictureinpicture", () => pipFlag(false));
   video.addEventListener("webkitpresentationmodechanged", () => pipFlag(video.webkitPresentationMode === "picture-in-picture"));
 
+  // Controle manual funciona em ambos os modos. No modo Voz, reiniciamos a
+  // sessão de reconhecimento para não realinhar com falas antigas após voltar.
+  let manualResumeTimer = null;
   function seek(delta) {
     if(cfg.mode==="voice") {
-      const deltaWords=Math.round(delta*cfg.wpm/60);
-      wordCursor=Math.min(Math.max(wordCursor+deltaWords,0),scriptWords.length);
-      drawVoiceFrame();return;
+      if (!scriptWords.length || !delta) return;
+      const deltaWords = Math.round(delta / SKIP * cfg.voiceStep);
+      const next = Math.min(Math.max(wordCursor + deltaWords, 0), scriptWords.length);
+      if (next === wordCursor) return;
+      const resumeVoice = listening || manualResumeTimer !== null;
+      if (resumeVoice) stopVoice("Posição ajustada. Retomando a escuta...");
+      wordCursor = next;
+      drawVoiceFrame();
+      updateFloatingControls();
+      if (resumeVoice && next < scriptWords.length) {
+        manualResumeTimer = setTimeout(() => {
+          manualResumeTimer = null;
+          if (cfg.mode==="voice" && !listening) startVoice();
+        }, 300);
+      } else if (next >= scriptWords.length) {
+        updateVoiceUi("Fim do roteiro. Use ← para voltar.");
+      }
+      return;
     }
     if (!rendered) return;
     const d = video.duration || rendered.duration;
     video.currentTime = Math.min(Math.max(video.currentTime + delta, 0), Math.max(d - 0.1, 0));
   }
 
+  function handleArrowKeys(event) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    if (cfg.mode==="voice" ? !scriptWords.length : !rendered) return;
+    event.preventDefault();
+    seek((event.key === "ArrowRight" ? 1 : -1) * SKIP * (event.shiftKey ? 3 : 1));
+  }
+
   if ("mediaSession" in navigator) {
     try {
       navigator.mediaSession.metadata = new MediaMetadata({ title: "Floating Cue", artist: "Teleprompter" });
-      navigator.mediaSession.setActionHandler("play", () => video.play());
-      navigator.mediaSession.setActionHandler("pause", () => video.pause());
+      navigator.mediaSession.setActionHandler("play", () => { if (cfg.mode==="voice") { if (!listening) startVoice(); } else video.play(); });
+      navigator.mediaSession.setActionHandler("pause", () => { if (cfg.mode==="voice") { if (listening) stopVoice("Escuta pausada."); } else video.pause(); });
       navigator.mediaSession.setActionHandler("seekbackward", (d) => seek(-((d && d.seekOffset) || SKIP)));
       navigator.mediaSession.setActionHandler("seekforward", (d) => seek((d && d.seekOffset) || SKIP));
     } catch (e) { /* recurso opcional */ }
@@ -735,6 +844,7 @@ textarea {
       seconds=voiceWordTimes[wordCursor-1];
     drawFrame(pctx,voiceLayout,cfg,seconds,cfg.wpm);
     $("durationLabel").textContent=wordCursor+" / "+scriptWords.length+" palavras";
+    updateFloatingControls();
   }
   let voiceWordTimes=[];
   function prepareVoiceStream() {
@@ -756,6 +866,7 @@ textarea {
   }
   function selectReadingMode() {
     stopVoice();
+    if(cfg.mode!=="voice" && pipWindow && !pipWindow.closed) pipWindow.close();
     if(cfg.mode==="voice") {
       wordCursor=0;
       try { prepareVoiceStream(); }
@@ -776,16 +887,19 @@ textarea {
     else if(!SpeechAPI) $("voiceStatus").textContent = "Reconhecimento de voz indisponível neste navegador.";
     else if(!scriptWords.length) $("voiceStatus").textContent = "Cole um roteiro antes de ativar o microfone.";
     else if(!listening) $("voiceStatus").textContent = "Permita o microfone e leia o roteiro normalmente.";
+    updateFloatingControls();
   }
 
   function stopVoice(status) {
     listening=false; clearTimeout(restartTimer); restartTimer=null;
+    clearTimeout(manualResumeTimer); manualResumeTimer=null;
     const current=recognition; recognition=null;
     if(current) {
       current.onend=null;current.onerror=null;current.onresult=null;
-      try { current.stop(); } catch(e) {}
+      try { current.abort(); } catch(e) { try { current.stop(); } catch(_) {} }
     }
     updateVoiceUi(status);
+    refreshState();
   }
 
   function alignVoice(transcription) {
@@ -849,7 +963,7 @@ textarea {
         try{r.start()}catch(e){stopVoice("Não foi possível retomar a escuta.")}
       },650);
     };
-    try{r.start();updateVoiceUi("Aguardando sua fala em português...")}
+    try{r.start();updateVoiceUi("Aguardando sua fala em português...");refreshState()}
     catch(e){stopVoice("Não foi possível iniciar o microfone: "+e.message)}
   }
 
@@ -902,6 +1016,12 @@ textarea {
       selectReadingMode();applyRate();
     });
     $("btnListen").addEventListener("click",toggleVoice);
+    $("voiceStep").value=String(cfg.voiceStep);
+    $("voiceStep").addEventListener("change",()=>{
+      cfg.voiceStep=Number($("voiceStep").value); store.set("voiceStep",cfg.voiceStep);
+      refreshState();updateFloatingControls();
+    });
+    document.addEventListener("keydown",handleArrowKeys,true);
     $("wpmOut").textContent = `${cfg.wpm} palavras/min`;
     $("fontOut").textContent = cfg.font;
     document.querySelectorAll('input[name="fmt"]').forEach((r) => { r.checked = r.value === cfg.format; });
@@ -939,7 +1059,7 @@ textarea {
     $("btnPlay").addEventListener("click", () => { if(cfg.mode==="voice"){toggleVoice();return} if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); } else video.pause(); });
     $("btnBack").addEventListener("click", () => seek(-SKIP));
     $("btnFwd").addEventListener("click", () => seek(SKIP));
-    $("btnRestart").addEventListener("click", () => {stopVoice(); if(cfg.mode==="voice"){wordCursor=0;drawVoiceFrame();}else{video.pause();seek(-1e9);} });
+    $("btnRestart").addEventListener("click", () => { if(cfg.mode==="voice"){seek(-SKIP*1e6);}else{video.pause();seek(-1e9);} });
     $("btnCal").addEventListener("click", toggleCal);
   }
 
